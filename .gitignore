@@ -1,0 +1,5 @@
+accounts.txt
+config.py
+*.rar
+*.json
+**/
