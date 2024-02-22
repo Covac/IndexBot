@@ -11,10 +11,14 @@ from concurrent.futures import ThreadPoolExecutor
 
 disable_warnings()
 
-def findRVT(text):
-    MATCH = re.search('"__RequestVerificationToken" type="hidden" value="',text)
-    rvt = text[MATCH.span()[1]:MATCH.span()[1]+155]
-    return rvt
+def findRVT(text):#write decorators for these 3
+    try:
+        MATCH = re.search('"__RequestVerificationToken" type="hidden" value="',text)
+        rvt = text[MATCH.span()[1]:MATCH.span()[1]+155]
+        return rvt
+    except Exception as e:
+        print(e)
+        raise RuntimeError("Cloudflare or you did something wrong!")
 
 def findThread(text):
     MATCH = re.search('commentThreadId=',text)
@@ -123,7 +127,8 @@ def login(email,password):# If I move this headers some will be generated from f
     formdata = {'login_hint': email}
     params = {'redirectUrl': 'https://www.index.hr/'}
     #Login screen
-    r = session.post('https://www.index.hr/profil/prijava',params=params,data=formdata)
+    #r = session.post('https://www.index.hr/profil/prijava',params=params,data=formdata)
+    r = rm.requestWithProxy('POST','https://www.index.hr/profil/prijava',session,singleMode=True,params=params,data=formdata)
     RVT = findRVT(r.text)
     q_params = queryStringParameters(r.url)
     loginformdata = {'ReturnUrl': q_params,
@@ -134,11 +139,14 @@ def login(email,password):# If I move this headers some will be generated from f
                      'button': 'login'}
     loginparams = {'ReturnUrl': q_params}
     #Complete login
-    r2 = session.post('https://sso.index.hr/Account/Login',params=loginparams,data=loginformdata)
+    #r2 = session.post('https://sso.index.hr/Account/Login',params=loginparams,data=loginformdata)
+    r2 = rm.requestWithProxy('POST','https://sso.index.hr/Account/Login',session,singleMode=True,params=loginparams,data=loginformdata)
     signindata = findServerResponse(r2.text)
     sleep(1)
-    r3 = session.post('https://www.index.hr/signin-oidc',data=signindata)
-    me = session.get('https://www.index.hr/api/me')
+    #r3 = session.post('https://www.index.hr/signin-oidc',data=signindata)
+    r3 = rm.requestWithProxy('POST','https://www.index.hr/signin-oidc',session,singleMode=True,data=signindata)
+    #me = session.get('https://www.index.hr/api/me')
+    me = rm.requestWithProxy('GET','https://www.index.hr/api/me',session,singleMode=True)
     print(r.status_code,r2.status_code,r3.status_code,me.status_code)
     return session, r, r2, r3 ,me
 
@@ -225,10 +233,19 @@ def comment(url, comments):#Okay we need to finish this one up, simple for now
         responses.append(r1)#debugging help
 
 def login_all(accs):#maybe add fake and half options
-    for acc in accs:
-        print(acc[0],acc[1])
-        s,r1,r2,r3,me_info = login(acc[0],acc[1])
+    finished = []
+    with ThreadPoolExecutor(max_workers=12) as ex:#finish up after getting results
+        for acc in accs:
+            try:
+                #s,r1,r2,r3,me_info = login(acc[0],acc[1])
+                future = ex.submit(login,acc[0],acc[1])
+                finished.append(future)
+            except Exception as e:
+                print(e)
+                continue
+    for f in finished:
         try:
+            s,r1,r2,r3,me_info = f.result()
             auth_user = User(s,me_info.json(),acc[0],acc[1])#Shall we remove passwords later if we stay logged in forever?
             auth_user.prepMe()
             auth_user.aboutMe()
@@ -237,13 +254,10 @@ def login_all(accs):#maybe add fake and half options
                 user_list.appendBanned(auth_user)
             else:
                 user_list.append(auth_user)
+            print("*********** DONE ***********")
         except Exception as e:
             print(e)
-            print("Error occoured, authentication probably failed or something changed")
-            continue
-        print("*********** DONE ***********")
-        #sleep(randint(1,4)) I will remove this for now to see if cloudflare or provider even cares about fast logins RIP IF OTHERWISE
-        sleep(0.25)
+
 
 def display_all_profiles(amount=5):
     for u in user_list.user_list:

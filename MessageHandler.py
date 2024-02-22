@@ -1,4 +1,4 @@
-from globals import *#maybe we don't do it here? okay we do we want to reuse a LOT
+from globals import rm,user_list#maybe we don't do it here? okay we do we want to reuse a LOT
 from functions import *#test without all
 
 class MessageHandler():
@@ -49,6 +49,8 @@ class MessageHandler():
 
     def serve(self,cycle_seconds=120):#site auto refreshes every 5 mins
         while True:
+            if rm.sinceLastRefresh() >= rm.refreshEvery:
+                rm.refreshProxyList()
             for user in user_list.user_list+user_list.banned:
                 if user.sinceLastRefresh() > cycle_seconds:
                     user.session.get('https://www.index.hr/najnovije?kategorija=3')
