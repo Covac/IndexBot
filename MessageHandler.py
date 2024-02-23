@@ -53,9 +53,9 @@ class MessageHandler():
                 rm.refreshProxyList()
             for user in user_list.user_list+user_list.banned:
                 if user.sinceLastRefresh() > cycle_seconds:
-                    user.session.get('https://www.index.hr/najnovije?kategorija=3')
+                    rm.requestWithProxy('GET','https://www.index.hr/najnovije?kategorija=3',user.session,singleMode=True)
                     user.refreshMe()
-            if self.pipe.poll(cycle_seconds):
+            if self.pipe.poll(3):
                 command = self.pipe.recv()
                 self.handleMessages(command)#DO IT!
                 self.pipe.send(True)#we send someething to sync cli and this process outputs

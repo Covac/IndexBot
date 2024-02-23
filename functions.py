@@ -1,7 +1,6 @@
 import re
 import json
 import requests
-from User import *
 from time import sleep
 from random import randint
 from globals import *
@@ -49,6 +48,7 @@ def queryStringParameters(url):#Well for now I only need ReturnUrl so we keep it
     query_params = parse_qs(parsed.query)
     return query_params['ReturnUrl'][0]
 
+"""
 def getFreshProxies():#We could have had one pretty oneliner if we didn't want unique proxies
     pr = requests.get(proxyLink)
     proxies = [x.replace("socks5","socks5h") for x in pr.text.split('\r\n') if len(x)>1]
@@ -67,7 +67,7 @@ def getFreshProxies():#We could have had one pretty oneliner if we didn't want u
             unique_proxies.append(p)
     print(f"Removed bloat {len(proxies)-len(unique_proxies)}")
     print(f"{len(unique_proxies)} unique proxies!")
-    return [{'http':p, 'https':p} for p in unique_proxies]
+    return [{'http':p, 'https':p} for p in unique_proxies]"""
 
 #lets do it FUNCTIONAL style =====================================================
 #Might need some work on headers to be less sus and use less lines
@@ -76,7 +76,7 @@ def postComment(user,thread,comment,url,fake_pause=3):
     payload = {"commentThreadId":thread,"content":comment}
     j = json.dumps(payload,indent=None)
     commentHeaders = {'Accept':'application/json, text/plain, */*',
-                      'Accept-Encoding':'gzip, deflate, br',
+                      'Accept-Encoding':'gzip, deflate',
                       'Accept-Language':'en-US,en;q=0.9,hr;q=0.8',
                       'Content-Length': str(len(j)),
                       'Origin':'https://www.index.hr',
@@ -89,7 +89,7 @@ def postComment(user,thread,comment,url,fake_pause=3):
                       'Sec-Fetch-Site': 'same-origin',
                       'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                       }
-    fakeget = ses.get(url)
+    fakeget = rm.requestWithProxy('GET',url=url)
     #fakescroll1 = ses.get('https://www.index.hr/api/me')
     """params = {"sortBy": 2,
               "commentThreadId": thread,
@@ -99,7 +99,7 @@ def postComment(user,thread,comment,url,fake_pause=3):
     #fakescroll2 = ses.get('https://www.index.hr/api/comments',params=params)
     assert len(comment) <= 1500
     sleep(randint(0,fake_pause))#fake pisanje komentara)
-    r3 = ses.post("https://www.index.hr/api/comments/",headers=commentHeaders,json=payload)
+    r3 = rm.requestWithProxy('POST',"https://www.index.hr/api/comments/",ses,singleMode=True,headers=commentHeaders,json=payload)
     rj = r3.json()
     if r3.status_code == 200 and rj['success']:
         user.burnThread(thread)
@@ -148,49 +148,23 @@ def login(email,password):# If I move this headers some will be generated from f
     #me = session.get('https://www.index.hr/api/me')
     me = rm.requestWithProxy('GET','https://www.index.hr/api/me',session,singleMode=True)
     print(r.status_code,r2.status_code,r3.status_code,me.status_code)
-    return session, r, r2, r3 ,me
+    return session, r, r2, r3 ,me, email, password
 
-def reactToComment(user,comment_id,rType,unique_proxies,retries):#1 like, 0 dislike, null remove!
-    #No problems possible because we can like our own post!
-    p = unique_proxies.pop(0)#if it fails to pop it will fail anyway, no need to raise
+def reactToComment(user,comment_id,rType):
+    #1 like, 0 dislike, null remove!
     payload = {'commentId':comment_id,'type': rType}
-    for attempt in range(1,retries+1): 
-        try:
-            #print(f"{user.username} is reacting with proxy: {p}")
-            r = user.session.post('https://www.index.hr/api/comments/react',json=payload,proxies=p,timeout=10,verify=False)
-            print(r.json())#if this fails it means we kissed cloudflare
-            break
-        except (requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout) as e:#noncritical fails!
-                if (attempt % 3 == 0) and len(unique_proxies)>0 and attempt!=retries:
-                    p = unique_proxies.pop(0)
-                    print(f"React attempt {attempt} failed! Getting new proxy: {p} Reason: {e.__class__.__name__}")
-                else:
-                    print(f"React attempt {attempt} failed! Error: {e.__class__.__name__}")
-                if len(unique_proxies)==0:
-                    raise RuntimeError("No backup proxies left!")             
-        #except (requests.exceptions.JSONDecodeError) as e:#Only bundled work with bundled errors i guess?
-            #print("error?")
-            #pass
-        except Exception as e:#critical faliures, probably cloudflare
-            print(f"React attempt {attempt} failed! Error: {e.__class__.__name__} Reason: {e.args[0]}")
-            if len(unique_proxies)>0:
-                p = unique_proxies.pop(0)
-            else:
-                raise RuntimeError("No backup proxies left!") 
-        finally:
-            if attempt==retries:
-                raise RuntimeError("No more attempts left!")
+    r = rm.requestWithProxy('POST','https://www.index.hr/api/comments/react',user.session,unique=True,alwaysProxy=True,json=payload)
+    print(r.json())
 
 def massReact(comment_id,rType,timeout=0):
     #IP limited. So I will try to get as much likes as possible
     #I decided to try (tbd if it works) using tor as like system proxy for proxychains and then force proxy over it. Double trouble?
     #No more zipping, we only care about having more than 0 proxies
-    unique_proxies = getFreshProxies()
     with ThreadPoolExecutor(max_workers=12) as executor:
         for u in user_list.user_list+user_list.banned:
             try:
                 sleep(timeout)
-                executor.submit(reactToComment,u,comment_id,rType,unique_proxies,retries=9)#3 tries per proxy
+                executor.submit(reactToComment,u,comment_id,rType)#3 tries per proxy
                 #I was expecting issues with print like ones in python shell, but with terminal it is fine so no need for threading lock :)
             except Exception as e:
                 print(f"{u.username} failed to react! {e}")
@@ -205,11 +179,11 @@ def displayProfile(user,skip=0,take=5):
 
 #there is a posibility of rewrite for some of these, and calling random sessions for these requests
 def inspectUserProfile(url,take=5):#no checks for this really, might fail
-    r = requests.get(url)
+    r = rm.requestWithProxy('GET',url=url)
     uid = findUserId(r.text)
     #uprofile = requests.get() WE DON'T ACTUALLY CARE ABOUT THIS
     qsp = {'createdById': uid,'skip': 0,'take':take}
-    ucomments = requests.get('https://www.index.hr/api/comments/user',params=qsp).json()
+    ucomments = rm.requestWithProxy('GET','https://www.index.hr/api/comments/user',params=qsp).json()
     for c in ucomments['comments']:
         print(f"=========={c['commentId']}xx{c['posterFullName']}xx{c['createdDateUtc']}==========")
         print(f"https://www.index.hr/clanak.aspx?id={c['relationshipEntityId']} \nText:{c['content']}\n👍{c['numberOfLikes']} 👎{c['numberOfDislikes']} 💬{c['replyCount']}")
@@ -225,7 +199,7 @@ def backupUsers():
 def comment(url, comments):#Okay we need to finish this one up, simple for now
     #maybe add referer to spoof more? Also maybe proxies?
     #timeout options?
-    r = requests.get(url)
+    r = rm.requestWithProxy('GET',url=url)
     thread = findThread(r.text)
     for u,c in zip(user_list.getReadyUsers(thread),comments):
         r1 = postComment(u,thread,c,r.url)
@@ -234,7 +208,7 @@ def comment(url, comments):#Okay we need to finish this one up, simple for now
 
 def login_all(accs):#maybe add fake and half options
     finished = []
-    with ThreadPoolExecutor(max_workers=12) as ex:#finish up after getting results
+    with ThreadPoolExecutor(max_workers=50) as ex:#finish up after getting results
         for acc in accs:
             try:
                 #s,r1,r2,r3,me_info = login(acc[0],acc[1])
@@ -245,8 +219,8 @@ def login_all(accs):#maybe add fake and half options
                 continue
     for f in finished:
         try:
-            s,r1,r2,r3,me_info = f.result()
-            auth_user = User(s,me_info.json(),acc[0],acc[1])#Shall we remove passwords later if we stay logged in forever?
+            s,r1,r2,r3,me_info,em,pa = f.result()
+            auth_user = User(s,me_info.json(),em,pa)#Shall we remove passwords later if we stay logged in forever?
             auth_user.prepMe()
             auth_user.aboutMe()
             auth_user.refreshMe()
@@ -260,8 +234,9 @@ def login_all(accs):#maybe add fake and half options
 
 
 def display_all_profiles(amount=5):
-    for u in user_list.user_list:
-        displayProfile(u,0,amount)
+    with ThreadPoolExecutor(max_workers=50) as ex:
+        for u in user_list.user_list:
+            ex.submit(displayProfile,u,0,amount)
 
 def show_help():
     #Shows help information.

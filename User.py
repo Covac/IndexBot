@@ -1,4 +1,5 @@
 from datetime import datetime
+import globals
 
 class User:#we will make user timeSTAMP itself when post is completed, so we only pass user because this is functional stuff!
     def __init__(self,session,api_me_json,e,p):#do i keep it for reconnect?!?
@@ -17,7 +18,7 @@ class User:#we will make user timeSTAMP itself when post is completed, so we onl
 
     def getProfileData(self,skip=0,take=5):
         qsp = {'createdById': self.id,'skip': skip,'take':take}
-        r = self.session.get('https://www.index.hr/api/comments/user',params=qsp)#If we care about faking we can add referer to /profil
+        r = globals.rm.requestWithProxy('GET','https://www.index.hr/api/comments/user',self.session,singleMode=True,params=qsp)#If we care about faking we can add referer to /profil
         return r.json()
     
     def refreshMe(self):

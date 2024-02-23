@@ -1,4 +1,5 @@
 import requests
+import options
 from config import proxyLink
 from datetime import datetime
 from urllib3 import disable_warnings
@@ -7,7 +8,7 @@ disable_warnings()
 
 
 class RequestsManager:
-    def __init__(self,maxAttempts=9,maxRetries=2,refreshEvery=60,timeout=5):
+    def __init__(self,maxAttempts=10,maxRetries=2,refreshEvery=15,timeout=5):
         self.maxAttempts = maxAttempts
         self.maxRetries = maxRetries
         self.refreshEvery = refreshEvery
@@ -86,18 +87,24 @@ class RequestsManager:
         self.ppl = [{'http':p, 'https':p} for p in self.proxy_list]
         self.uppl = [{'http':p, 'https':p} for p in self.unique_proxy_list]
 
-    def requestWithProxy(self,method,url,session,unique=False,consume=False,singleMode=False,**kwargs):
+    def requestWithProxy(self,method,url,session=requests.Session(),unique=False,consume=False,singleMode=False,alwaysProxy=False,**kwargs):
         kwargs['verify'] = False
+        kwargs['timeout'] = kwargs.setdefault('timeout',self.timeout)
+        if options.Proxy.FULL_PROXY == False and alwaysProxy == False:#This enables old mode, where we don't care about exposing ip, but it is more reliable!
+            r = session.request(method,url,**kwargs)
+            assert r.status_code == 200
+            assert r 
+            return r
         if singleMode:
             kwargs['proxies'], idx = self.getProxywidx(0,unique,consume)
         else:
             kwargs['proxies'] = self.getProxy(unique,consume)
-        kwargs['timeout'] = kwargs.setdefault('timeout',self.timeout)
         retries = 0 #rename to retries, and chances to retries!
         fatalFlag = False
         for attempt in range(1,self.maxAttempts+1):
             if retries >= self.maxRetries or fatalFlag:
-                print("Changing proxy!")
+                if options.Logging.VERBOSE:
+                    print("Changing proxy!")
                 if singleMode:
                     kwargs['proxies'], idx = self.getProxywidx(idx+1,unique,consume)
                 else:
@@ -109,9 +116,11 @@ class RequestsManager:
                 assert r.status_code == 200
                 break
             except (requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout) as e:
-                print(f"Attempt {attempt} failed! Reason: {e.__class__.__name__} -- NonCritical")
+                if options.Logging.VERBOSE:
+                    print(f"Attempt {attempt} failed! Reason: {e.__class__.__name__} -- NonCritical")
             except Exception as e:
                 fatalFlag = True
-                print(f"Attempt {attempt} failed! Reason: {e.__class__.__name__} -- CRITICAL")
+                if options.Logging.VERBOSE:
+                    print(f"Attempt {attempt} failed! Reason: {e.__class__.__name__} -- CRITICAL")
         assert r
         return r
