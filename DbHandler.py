@@ -68,7 +68,31 @@ class DatabaseHandler:
         except sqlite3.Error as e:
             print("Error:", e)
             return None
+    
+    def show_table(self,TABLE):
+        try:
+            cursor = self.conn.cursor()
+            for row in cursor.execute(f"SELECT * FROM {TABLE}"):#I know its unsafe but it gave me errors for no reason
+                print(row)
+        except sqlite3.Error as e:
+            print("Error:", e)
+
+    def show_tables(self):
+        try:
+            cursor = self.conn.cursor()
+            r = cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            print(r.fetchall())
+        except sqlite3.Error as e:
+            print("Error:", e)
 
     def close_connection(self):
         if self.conn:
             self.conn.close()
+
+def get_db():#for ssh
+    db = DatabaseHandler('data.db')
+    print("use db.METHOD()")
+    print(dir(db))
+    print("Tables: ")
+    db.show_tables()
+    return db
