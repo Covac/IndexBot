@@ -1,5 +1,12 @@
 accounts.txt
+banned.txt
+tasks-real.yml
+CardanoConsolidationTest.py
+test.py
 config.py
+RUNwSWAP.sh
+*.db
 *.rar
 *.json
+*.skey
 **/

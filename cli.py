@@ -81,6 +81,12 @@ class InteractiveConsole(cmd.Cmd):
         self.pipe.send(['react',args])
         self.waitForHandler()
 
+    def do_nuke(self, arg):
+        args = arg.split()
+        assert len(args) >= 2
+        self.pipe.send(['nuke',args])
+        self.waitForHandler()
+
     def do_inspect(self,arg):
         self.pipe.send(['inspect',arg])
         self.waitForHandler()

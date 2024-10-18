@@ -1,14 +1,14 @@
 import requests
 import options
-from config import proxyLink
-from datetime import datetime
+from config import proxyLinks
+from datetime import datetime, timezone
 from urllib3 import disable_warnings
 
 disable_warnings()
 
 
 class RequestsManager:
-    def __init__(self,maxAttempts=10,maxRetries=2,refreshEvery=15,timeout=5):
+    def __init__(self,maxAttempts=10,maxRetries=2,refreshEvery=20,timeout=5):#because http proxies are shit we are going up with attempts and less timeouts
         self.maxAttempts = maxAttempts
         self.maxRetries = maxRetries
         self.refreshEvery = refreshEvery
@@ -33,7 +33,7 @@ class RequestsManager:
         self.upplPointer = 0
 
     def sinceLastRefresh(self):#move this from here and User to functions, since it is shared
-        delta = datetime.utcnow() - self.last_refresh
+        delta = datetime.now(timezone.utc) - self.last_refresh
         return delta.total_seconds()
     
     def getProxywidx(self,idx,unique,consume):
@@ -61,13 +61,36 @@ class RequestsManager:
 
     def refreshProxyList(self):
         #maybe use options for more params
+        #looks like we are need more proxy providers for resilience, ones from proxyscrape went down and never came back.
         if len(self.ppl) > 0 or len(self.uppl) > 0:
             self.clearLists()
-        pr = requests.get(proxyLink)
-        self.proxy_list = [x.replace("socks5","socks5h") for x in pr.text.split('\r\n') if len(x)>1]
-        self.last_refresh = datetime.utcnow()
+        self.proxy_list = self.loadProxyList(proxyLinks)
+        self.last_refresh = datetime.now(timezone.utc)
         self.generateUniqueProxyList()
         self.prepareProxies()
+        if options.Logging.VERBOSE:
+            print(self.ppl, flush=True)
+            print(self.uppl, flush=True)
+
+    def loadProxyList(self,PROVIDER_LIST):
+        ready = []# we will make GEONODE mimic proxyscrape to reuse code
+        for PROVIDER in PROVIDER_LIST:
+            try:
+                pr = requests.get(PROVIDER['Link'])
+                if PROVIDER['Provider'] == 'PROXYSCRAPE':
+                    pl = [x.replace("socks5","socks5h") for x in pr.text.split('\r\n') if len(x)>1]
+                    ready.extend(pl)
+                elif PROVIDER['Provider'] == 'GEONODE':
+                    pl = []
+                    for DATA in pr.json()['data']:
+                        constructed = DATA['protocols'][0]+'://'+DATA['ip']+':'+DATA['port']
+                        constructed.replace("socks5","socks5h")
+                        pl.append(constructed)
+                    ready.extend(pl)
+            except:
+                print("Error in loadProxyList",flush=True)
+                continue
+        return ready
 
     def generateUniqueProxyList(self):
         for p in self.proxy_list:
@@ -84,6 +107,7 @@ class RequestsManager:
                 self.unique_proxy_list.append(p)
 
     def prepareProxies(self):
+        #We need https support for api calls, so https proxies are useless to us!
         self.ppl = [{'http':p, 'https':p} for p in self.proxy_list]
         self.uppl = [{'http':p, 'https':p} for p in self.unique_proxy_list]
 
@@ -104,7 +128,7 @@ class RequestsManager:
         for attempt in range(1,self.maxAttempts+1):
             if retries >= self.maxRetries or fatalFlag:
                 if options.Logging.VERBOSE:
-                    print("Changing proxy!")
+                    print("Changing proxy!", flush=True)
                 if singleMode:
                     kwargs['proxies'], idx = self.getProxywidx(idx+1,unique,consume)
                 else:
@@ -117,10 +141,10 @@ class RequestsManager:
                 break
             except (requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout) as e:
                 if options.Logging.VERBOSE:
-                    print(f"Attempt {attempt} failed! Reason: {e.__class__.__name__} -- NonCritical")
+                    print(f"Attempt {attempt} failed! Reason: {e.__class__.__name__} -- NonCritical", flush=True)
             except Exception as e:
                 fatalFlag = True
                 if options.Logging.VERBOSE:
-                    print(f"Attempt {attempt} failed! Reason: {e.__class__.__name__} -- CRITICAL")
+                    print(f"Attempt {attempt} failed! Reason: {e.__class__.__name__} -- CRITICAL", flush=True)
         assert r
         return r

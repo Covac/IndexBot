@@ -13,6 +13,10 @@ class UserManager:
         assert type(user) == User
         self.banned.append(user)
 
+    def clearUsers(self):
+        self.user_list.clear()
+        self.banned.clear()
+
     def getReadyUsers(self,thread):
         ready = []
         for u in self.user_list:
