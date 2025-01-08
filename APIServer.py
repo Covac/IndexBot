@@ -1,6 +1,6 @@
 from flask import Flask, request, send_from_directory,jsonify, Response
 from headers import staticSessionHeader as sHeader
-from functions import inspectUserProfile, getArticleComments, getReplies
+from functions import inspectUserProfile, getArticleComments, getReplies, getIP
 from options import Logging
 from config import dbPath, accountAmount
 import DbHandler
@@ -49,7 +49,15 @@ def getApp(pipe):
         #verify and do
         try:
             data = request.json#we need nicer data!
-            action,actionType,targetId,targetPublicId,amount,apiKey=data.values()
+            #actionType,action,targetId,targetPublicId,relatedArticleURL,amount,apiKey=data.values()
+            #SOMETHING WENT WRONG WITH ORDER 
+            actionType = data['actionType']
+            action = data['action']
+            targetId = data['targetId']
+            targetPublicId = data['targetPublicId']
+            relatedArticleURL = data['relatedArticleURL']
+            amount = data['amount']
+            apiKey = data['apiKey']
                 #assert types
             #return {'Error':'Invalid request data'}, 400, {"Content-Type":"application/json"}
             #validate key
@@ -67,14 +75,16 @@ def getApp(pipe):
             if token_amount < cost:
                 return jsonify({'Error':'Insufficient funds!'}), 403#, {"Content-Type":"application/json"}
             db_handler.update_token_amount(apiKey,-cost)
-            db_handler.add_transaction(apiKey,action,-cost,request.remote_addr)
+            #Make sure we get real ip, it could be forwarded
+            IP = getIP(request)
+            db_handler.add_transaction(apiKey,action,-cost,IP)
             print(action,actionType,targetId,targetPublicId,amount,apiKey, flush=True)#DEL ME
             if action == 'Nuke':
                 userURL = f"https://www.index.hr/profil/{targetPublicId}"
                 pipe.send([action.lower(),[userURL,0,amount]])
             elif action == 'React':
-                pipe.send([str(action.lower()),[str(targetId),str(actionType)],[amount]])
-                print("this is away, ",[str(action.lower()),[str(targetId),str(actionType)],[amount]], flush=True)
+                pipe.send([str(action.lower()),[str(targetId),str(actionType)],[amount,relatedArticleURL]])
+                print("this is away, ",[str(action.lower()),[str(targetId),str(actionType)],[amount,relatedArticleURL]], flush=True)
             #mess = pipe.recv()
             #print(mess)
             return jsonify({'Response':'success','newBalance':token_amount-cost}), 200#, {"Content-Type":"application/json"}
@@ -151,7 +161,8 @@ def getApp(pipe):
     @app.route('/api/order', methods=['POST'])
     def order():
         data = request.json
-        apiKey,sessionKey,requestIP = data['apiKey'],data['sessionKey'], request.remote_addr
+        IP = getIP(request)
+        apiKey,sessionKey,requestIP = data['apiKey'],data['sessionKey'], IP
         print(apiKey,sessionKey,requestIP)
         if not apiKey.isalnum():
             return jsonify({'Error':'API Key must be alphanumeric!'}), 400
@@ -166,6 +177,7 @@ def getApp(pipe):
     @app.route('/api/order/confirmTransaction', methods=['POST'])
     def confirmation():#at this point isn't session key useless?
         data = request.json
+        IP = getIP(request)
         session_key = data['sessionKey']
         apikey,paymentAddr,status = db_handler.get_apikey_addr_from_order(session_key)
         if status == 'COMPLETED':
@@ -179,8 +191,8 @@ def getApp(pipe):
             if not(db_handler.check_apikey_exists(apikey)):
                 db_handler.add_api_key(apikey)
             db_handler.update_token_amount(apikey,tokens)
-            db_handler.add_transaction(apikey,'TOKEN PURCHASE',tokens,request.remote_addr)
-            db_handler.confirm_order(balance,'COMPLETED',apikey,session_key,request.remote_addr)
+            db_handler.add_transaction(apikey,'TOKEN PURCHASE',tokens,IP)
+            db_handler.confirm_order(balance,'COMPLETED',apikey,session_key,IP)
             return jsonify({'Result':'Completed','TokensBought':tokens}), 200
         elif balance == 0:#nobody paid yet!
             return jsonify({'Result':'Failed','Reason':'Transaction not detected yet! Try again later when this message disappears.'}), 200

@@ -1,6 +1,9 @@
 accounts.txt
 banned.txt
+DeadTasks.txt
+prompts.txt
 tasks-real.yml
+tasks.yml
 CardanoConsolidationTest.py
 test.py
 config.py

@@ -100,16 +100,21 @@ class MessageHandler():
                         t['history'] += res
                         self.shared_history += res
                     else:#We have to analyze why task failed
-                        reason = rj['error']
-                        if reason == None:
-                            print(f'Why did we fail? {rj}',flush=True)
+                        reason = rj.get('error') or rj.get('reason')
+                        if reason is None:
+                            print(f'*CRITICAL?*Why did we fail? {rj}',flush=True)
                         else:
                             if reason['code'] == 14:#IP limiting
                                 pass#we do nothing for now, we have about 15 seconds to try multiple ips
                             elif reason['code'] == 5:#We got banned, noticed that 2 of them got banned when dislikes per comment were over 2
                                 self.tasks.remove(t)
+                            elif reason['code'] == 400:
+                                 print(f"{t['task']} :: {user.username} | {user.email} | {user.public_url} X--> FAILED, CODE = 400, *CUSTOM*\nINSIGHT:\n{reason['insight']}", flush=True)
+                            elif reason['code'] == 429:#Groq error passed through, rate limit error, just wait for next iteration
+                                print(f"{t['task']} :: {user.username} | {user.email} | {user.public_url} X--> FAILED, Rate Limited, CODE = 429", flush=True)
+                                t['lastExeAt'] = datetime.now(timezone.utc)
                             else:#right now we don't care about other error
-                                t['history'] += res#this is restart-proff
+                                t['history'] += res#this is restart-proff, other errors we don't care about really...
 
                 elif t['task'] == 'STALK':
                     res = doStalk(t['target'],t['type'],t['amount'],t['history'],t['lastExeAt'])
@@ -132,7 +137,7 @@ class MessageHandler():
                     doFakeActivity(user,amount)#you can specify url if you wanna with specifyURL= needs logic first tho...
 
         except RequestException as e:#We want to capture error here
-            print(f"Request exception during {t['task']}, relogging the user!")
+            print(f"Request exception {e} occured during {t['task']}, relogging the user!")
             if t['task'] == 'SHITPOST':
                 newsession, *_ = login(user.email,user.password)
                 user.session = newsession
@@ -144,7 +149,7 @@ class MessageHandler():
             print(trace, flush=True)
             if t['task'] == 'SHITPOST': #Removing shitpost tasks because of some ugly fails that wasted bandwidth
                 print(f'{e} WAS CAUSED BY: {t} AND WAS REMOVED - USER: {user.username}', flush=True)
-                #self.tasks.remove(t) I got random error because of ReqMan. assert r
+                self.tasks.remove(t) #I got random error because of ReqMan. assert r, looks like there is new filter from 28th
                 #Right now I guess we are not removing anything because it will only fail because you are banned. And sadly get your logs flooded
             elif t['task'] == 'STALK':
                 print(f'{e} WAS CAUSED BY: {t}')
@@ -164,15 +169,16 @@ class MessageHandler():
             if len(command) > 2:
                 extendedArgs = command[2]
                 reactAmount = int(extendedArgs[0])
+                articleURL = str(extendedArgs[1])
             if args[1].isnumeric():
                 comment_id,rType = int(args[0]),int(args[1])
             else:
                 comment_id,rType = int(args[0]), None
             if len(args) > 2:
-                timeout = int(args[2])
-                massReact(comment_id,rType,timeout,rAmount=reactAmount)
+                timeout = int(args[2]) # this is unused, and might need to be 3
+                massReact(comment_id,rType,timeout,rAmount=reactAmount,relatedArticleURL=articleURL)
             elif len(args) == 2:
-                massReact(comment_id,rType,rAmount=reactAmount)
+                massReact(comment_id,rType,rAmount=reactAmount,relatedArticleURL=articleURL)
 
         if command[0] == 'inspect':
             args = command[1].split()
@@ -181,7 +187,7 @@ class MessageHandler():
             elif len(args) == 2:
                 inspectUserProfile(args[0],args[1])
 
-        if command[0] == 'nuke':
+        if command[0] == 'nuke':#needs fixing
             args = command[1]
             print(args)
             if len(args) == 2:

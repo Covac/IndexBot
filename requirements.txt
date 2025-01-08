@@ -7,3 +7,4 @@ bech32
 pycardano
 blockfrost-python
 groq
+prettytable

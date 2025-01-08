@@ -1,23 +1,27 @@
 import re
 import json
+import groq #Just for error handling
 import requests
 import xml.etree.ElementTree as ET
 from time import sleep
 from random import randint,choice
 from globals import *
 from headers import *
-from options import Server
+from options import Server, Logging
+from config import accountAmount
 from urllib.parse import urlparse, parse_qs
 from urllib3 import disable_warnings
 from concurrent.futures import ThreadPoolExecutor
 from bs4 import BeautifulSoup
+if Logging.PRETTY_LOGIN:
+    from prettytable import PrettyTable
 
 disable_warnings()
 
-def findRVT(text):#write decorators for these 3
+def findRVT(text,length=155):#write decorators for these 3
     try:
         MATCH = re.search('"__RequestVerificationToken" type="hidden" value="',text)
-        rvt = text[MATCH.span()[1]:MATCH.span()[1]+155]#logout uses 198
+        rvt = text[MATCH.span()[1]:MATCH.span()[1]+length]#logout and react use 198
         return rvt
     except Exception as e:
         print(e)
@@ -118,7 +122,7 @@ def postComment(user,thread,comment,url=None,fake_pause=3):
     #fakescroll2 = ses.get('https://www.index.hr/api/comments',params=params)
     assert len(comment) <= 1500
     sleep(randint(0,fake_pause))#fake pisanje komentara)
-    r3 = rm.requestWithProxy('POST',"https://www.index.hr/api/comments/",user.session,alwaysProxy=True,unique=True,consume=True,singleMode=True,headers=commentHeader,json=payload)
+    r3 = rm.requestWithProxy('POST',"https://www.index.hr/api/comments/",user.session,headers=commentHeader,json=payload)
     rj = r3.json()
     if r3.status_code == 200 and rj['success']:
         user.burnThread(thread)
@@ -169,21 +173,45 @@ def login(email,password):# If I move this headers some will be generated from f
     print(r.status_code,r2.status_code,r3.status_code,me.status_code, flush=True)
     return session, r, r2, r3 ,me, email, password
 
-def reactToComment(user,comment_id,rType):
-    #1 like, 0 dislike, null remove!
-    payload = {'commentId':comment_id,'type': rType}
-    r = rm.requestWithProxy('POST','https://www.index.hr/api/comments/react',user.session,unique=True,alwaysProxy=True,json=payload)
+def reactToComment(user,comment_id,rType,article):
+    #New sad and obnoxious attempt to block reacting below!
+    #So... what caused main problem was content length that if wrong would cause 404
+    #Also no RequestVerificationToken would cause 404, and just a bit different headers
+    #Would cause 500 errors, after all time I spent doing this I couldn't care less
+    #If there are some useless headers, their fault for chaning it and increasing their own
+    #Traffic, it changed nothing... Think of this mess as Manual override!
+    #IF there are going to be more OOM crashes, reuse r variable
+
+    r00 = rm.requestWithProxy('GET',article,user.session)#Might not work with diff ips but we will try
+    t = findThread(r00.text)
+    r01 = rm.requestWithProxy('GET',f"https://www.index.hr/ajax-noindex/display-article-comments?commentThreadId={t}",user.session)
+    rvt = findRVT(r01.text,length=198)
+    # 1 like, 0 dislike, null remove!
+    payload = {"commentId":comment_id,"type":rType}
+    j = json.dumps(payload,separators=(',', ':'))
+    l = str(len(j))
+    cookies = user.session.cookies.get_dict()
+    cookie_header = '; '.join([f'{key}={value}' for key, value in cookies.items()])
+    rvtHeader = dynamicReactHeader(article,rvt,l,cookie_header)
+    #No need to update session, it just works :D
+    r = rm.requestWithProxy('POST','https://www.index.hr/api/comments/react',unique=True,alwaysProxy=True,headers=rvtHeader,data=j)#json passing is breaking stuff as of 18-Dec-25
     print(r.json(), flush=True)
 
-def massReact(comment_id,rType,timeout=0,rAmount=None):
+def massReact(comment_id,rType,timeout=0,rAmount=0,relatedArticleURL=None,rebuildURL=False):
     #IP limited. So I will try to get as much likes as possible
     #I decided to try (tbd if it works) using tor as like system proxy for proxychains and then force proxy over it. Double trouble?
     #No more zipping, we only care about having more than 0 proxies
+    if relatedArticleURL == None:
+        #This is needed from now on because of the new changes
+        print("CANNOT DO REACTS OF ANY KIND WITHOUT REQUESTVERIFICATIONTOKEN!!!",flush=True)
+        return 404 #Very thematic!
+    if relatedArticleURL != None and rebuildURL:
+        relatedArticleURL = f"https://www.index.hr/clanak.aspx?id={relatedArticleURL}" # Rebuild link
     with ThreadPoolExecutor(max_workers=30) as executor:
         for u in (user_list.user_list+user_list.banned)[:rAmount]:
             try:
                 sleep(timeout)
-                executor.submit(reactToComment,u,comment_id,rType)#3 tries per proxy
+                executor.submit(reactToComment,u,comment_id,rType,relatedArticleURL)#3 tries per proxy
                 #I was expecting issues with print like ones in python shell, but with terminal it is fine so no need for threading lock :)
             except Exception as e:
                 print(f"{u.username} failed to react! {e}", flush=True)
@@ -252,24 +280,29 @@ def doShitpost(user,comments,history,covert=False,specifyURL='https://www.index.
                 soup = BeautifulSoup(r.text,'html.parser')
                 allP = soup.find_all('p')
                 allPClean = "\n".join([p.get_text(strip=True) for p in allP])
-                completion = groq_clinet.chat.completions.create(
-                    model="llama-3.1-70b-versatile",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": comments
-                        },
-                        {
-                            "role": "user",
-                            "content": allPClean
-                        }
-                    ],
-                    temperature=0.49,
-                    max_tokens=8000,
-                    top_p=1,
-                    stream=False,
-                    stop=None,
-                )
+                try:
+                    completion = groq_clinet.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": comments
+                            },
+                            {
+                                "role": "user",
+                                "content": allPClean
+                            }
+                        ],
+                        temperature=0.49,
+                        max_tokens=8000,
+                        top_p=1,
+                        stream=False,
+                        stop=None,
+                    )
+                except groq.RateLimitError as e:#error is printed from return message object
+                    return [], {'success':False,'reason':{'error':'Rate Limit Error','code':429}}
+                except Exception as e:
+                    return [], {'success':False,'reason':{'error':'Unhandled Groq Error','code':'UNKNOWN'}}
             if spoofBeacons:
                 beaconPayload = extractTrackingBeaconData(r.text)#This along with proxied postComment is going to be sus!
                 rb = fakeActivity(user,beaconPayload)
@@ -278,21 +311,28 @@ def doShitpost(user,comments,history,covert=False,specifyURL='https://www.index.
                 r = postComment(user,thread,comment=completion.choices[0].message.content,url=r.url,fake_pause=0)
             else:
                 r = postComment(user,thread,comment=choice(comments),url=r.url,fake_pause=0)#None is to not do fakeget,0 no pause
-            return [al], r.json() #for history
+            if 'application/json' in r.headers.get('Content-Type'):
+                rj = r.json()
+            else:
+                # We got cold shoulder from server, I am still unsure but could have been because i changed some accept encodings, we shall see!!!
+                # So we will construct random "JSON to deal with the fallout"
+                rj = {'success':False,'error':{'message':'Server returned wrong Content-Type, probably an empty response','code':400,'insight':r.text}}
+            return [al], rj #for history
     return [], 'No articles left'#we have to return something iterable
 
 
 def doStalk(target,rType,amount,history,lea):#we can always use more params for used funcs
     uc = inspectUserProfile(target,5,True,0)#to waste less time, even if we find bunch of comments
     stalkyResults = []
-    for c in uc:
+    for c in uc: #To be honest, here I could only pass threads and change dynamicHeader for react but if this is being actively fought, lets keep it spoofed
         cid = c['commentId']#I wonder...
+        cra = c['relationshipEntityId']
         if cid in history:
             continue
         date = datetime.fromisoformat(c['createdDateUtc']).replace(tzinfo=timezone.utc)
         if date > lea:#newer is true
             stalkyResults.append(cid)
-            massReact(cid,rType,0,amount)
+            massReact(cid,rType,0,amount,relatedArticleURL=cra,rebuildURL=True)
     return stalkyResults
 
 def doFakeActivity(user,readAmount=1,specifyURL='https://www.index.hr/najnovije'):
@@ -314,6 +354,16 @@ def backupUsers():
                         json.dump(u.getProfileData(chunk*20,(chunk+1)*20),file,ensure_ascii=False, indent=4)
                         print(f"Saved comments for {u.username}")
 
+def getIP(request):
+    # Check headers for original client IP
+    if "X-Forwarded-For" in request.headers:
+        # Use the first IP in the X-Forwarded-For chain
+        return request.headers["X-Forwarded-For"].split(",")[0]#<--- We are using this one
+    elif "X-Real-IP" in request.headers:
+        return request.headers["X-Real-IP"]
+    else:
+        return request.remote_addr
+
 #****************************************** CMD COMMANDS BELOW
 
 def comment(url, comments):#Okay we need to finish this one up, simple for now
@@ -328,6 +378,7 @@ def comment(url, comments):#Okay we need to finish this one up, simple for now
 
 def login_all(accs):#maybe add fake and half options
     finished = []
+    about_us = []
     with ThreadPoolExecutor(max_workers=50) as ex:#finish up after getting results
         for acc in accs:
             try:
@@ -342,7 +393,10 @@ def login_all(accs):#maybe add fake and half options
             s,r1,r2,r3,me_info,em,pa = f.result()
             auth_user = User(s,me_info.json(),em,pa)#Shall we remove passwords later if we stay logged in forever?
             auth_user.prepMe()
-            auth_user.aboutMe()
+            if Logging.PRETTY_LOGIN:
+                about_us.append(auth_user.aboutMe(retInfo=True))
+            else:
+                auth_user.aboutMe()
             auth_user.refreshMe()
             if auth_user.banned:
                 user_list.appendBanned(auth_user)
@@ -350,8 +404,16 @@ def login_all(accs):#maybe add fake and half options
                 user_list.append(auth_user)
             if not Server.ONE_LINE_LOGS:
                 print("*********** DONE ***********", flush=True)
+            
         except Exception as e:
             print(e, flush=True)
+
+    if Logging.PRETTY_LOGIN:
+        table = PrettyTable()
+        table.field_names = ["Username","Public URL","Number of comments","Last commented X ago","New user?","BANNED?"]
+        table.add_rows(about_us)
+        table.align = 'l'
+        print(table,flush=True)
 
 
 def display_all_profiles(amount=5):
@@ -364,7 +426,8 @@ def nuke_profile(target,typeId,amount=5,timeout=0,userlist=None):#we will keep i
     for tc in target_comments:
         try:
             tc_id = int(tc['commentId'])
-            massReact(tc_id,typeId,timeout)
+            tc_ra = tc['relationshipEntityId']
+            massReact(tc_id,typeId,timeout=timeout,rAmount=accountAmount,relatedArticleURL=tc_ra,rebuildURL=True)
             #since this function is very long, we have to do the task of message handler, refreshing sessions
             print("Refresh subtask in progress", flush=True)
             for user in userlist:

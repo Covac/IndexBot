@@ -41,17 +41,20 @@ class User:#we will make user timeSTAMP itself when post is completed, so we onl
         except:
             print("New account or BANNED?", flush=True)
 
-    def aboutMe(self):
+    def aboutMe(self,retInfo=False):
         r = 'UNKNOWN' #This is useless now, but will be here as a reminder to rewrite this to include years and months.
         if self.last_comment_time != None:
             d = datetime.now(timezone.utc)-self.last_comment_time
             hours,remainder = divmod(d.total_seconds(),3600)
             minutes,seconds = divmod(remainder, 60)
             r = f'{int(hours)}H {int(minutes)}M {int(seconds)}S'
-        if Server.ONE_LINE_LOGS:
-            print(f'User: {self.username} | Public URL: {self.public_url} | Number of comments: {self.comments} | Last commented {r} ago | New user?: {self.new_user} | BANNED?: {self.banned}', flush=True)
-        else:
-            print(f'User: {self.username}\nPublic URL: {self.public_url}\nNumber of comments: {self.comments}\nLast commented {r} ago\nNew user?: {self.new_user}\nBANNED?: {self.banned}', flush=True)
+        if retInfo:
+            return [self.username, self.public_url, self.comments, r, self.new_user, self.banned]
+        elif retInfo == False:
+            if Server.ONE_LINE_LOGS:
+                print(f'User: {self.username} | Public URL: {self.public_url} | Number of comments: {self.comments} | Last commented {r} ago | New user?: {self.new_user} | BANNED?: {self.banned}', flush=True)
+            else:
+                print(f'User: {self.username}\nPublic URL: {self.public_url}\nNumber of comments: {self.comments}\nLast commented {r} ago\nNew user?: {self.new_user}\nBANNED?: {self.banned}', flush=True)
 
     def getSession(self,thread):
         #check if burned
