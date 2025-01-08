@@ -14,4 +14,4 @@ Target hardware was cheap web service or old laptop, so there was no plans to go
 
 > “Now I am become Botter, the destroyer of comment sections.” ~ those 2 cretins that know no moderation - April 5th 2024.
 
-*I will update README in a couple of days to address current problems and limitations around account creation and user actions*
+*Please use this for fun, don't abuse it.*
