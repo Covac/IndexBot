@@ -15,3 +15,10 @@ Target hardware was cheap web service or old laptop, so there was no plans to go
 > “Now I am become Botter, the destroyer of comment sections.” ~ those 2 cretins that know no moderation - April 5th 2024.
 
 *Please use this for fun, don't abuse it.*
+
+## Well it's over now anyway
+
+![alttext](https://github.com/Covac/IndexBot/blob/main/ItsOver.jpg)
+
+I didn't update this because of potential for abuse but everything falls apart with this, so don't bother trying unless you have easy access to gmail accounts, and hook them up with google API to read emails.
+Time to archive 😢
